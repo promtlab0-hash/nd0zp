@@ -1,19 +1,36 @@
-import os, sys, json, urllib.request, urllib.parse
+import os, sys, json, time, urllib.request, urllib.parse, urllib.error
 
 QUERY = "органайзер для хранения"
 MIN_RATING = 4.7
 MIN_FEEDBACKS = 150
 DEST = "-1257786"
-SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v5/search"
+SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v18/search"
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@nahodki_do_zp")
-UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
 
-def get_json(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode("utf-8"))
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Accept": "*/*",
+    "Accept-Language": "ru-RU,ru;q=0.9",
+    "Origin": "https://www.wildberries.ru",
+    "Referer": "https://www.wildberries.ru/",
+}
+
+def get_json(url, tries=4):
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            last = e
+            print(f"Try {i+1}: HTTP {e.code}")
+            if e.code in (429, 403, 500, 502, 503):
+                time.sleep(5 * (i + 1)); continue
+            raise
+    raise last
 
 def tg(text):
     data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
@@ -34,22 +51,24 @@ def get_price(p):
 
 def main():
     params = urllib.parse.urlencode({
-        "appType": "1", "curr": "rub", "dest": DEST,
-        "query": QUERY, "resultset": "catalog", "sort": "popular", "spp": "30",
+        "appType": "1", "curr": "rub", "dest": DEST, "lang": "ru",
+        "page": "1", "query": QUERY, "resultset": "catalog",
+        "sort": "popular", "spp": "30",
     })
     url = f"{SEARCH_URL}?{params}"
     print("Requesting:", url)
     try:
         data = get_json(url)
     except Exception as e:
-        tg(f"⚠️ Не смог запросить WB: {e}")
+        tg(f"⚠️ WB не отвечает: {e}")
         print("ERROR:", e); sys.exit(1)
 
-    products = (data.get("data") or {}).get("products") or []
+    root = data.get("data") or data
+    products = root.get("products") or []
     print("Products returned:", len(products))
     if not products:
-        tg("⚠️ WB вернул 0 товаров — возможно, изменился эндпоинт.")
-        print("RAW:", json.dumps(data)[:1000]); return
+        tg(f"⚠️ 0 товаров. Ключи ответа: {list(data.keys())}")
+        print("RAW:", json.dumps(data)[:1500]); return
     print("First product keys:", list(products[0].keys()))
 
     for p in products:
@@ -67,3 +86,4 @@ def main():
     print("Sample:", json.dumps(products[0])[:800])
 
 main()
+
