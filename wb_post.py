@@ -1,4 +1,7 @@
-import os, sys, json, time, urllib.request, urllib.parse, urllib.error
+import os, sys, time, requests
+from io import BytesIO
+from urllib.parse import urlencode
+from PIL import Image
 
 QUERY = "органайзер для хранения"
 MIN_RATING = 4.7
@@ -8,6 +11,7 @@ SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v18/search"
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@nahodki_do_zp")
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
@@ -18,25 +22,23 @@ HEADERS = {
 }
 
 def get_json(url, tries=4):
-    last = None
+    r = None
     for i in range(tries):
-        try:
-            req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            last = e
-            print(f"Try {i+1}: HTTP {e.code}")
-            if e.code in (429, 403, 500, 502, 503):
-                time.sleep(5 * (i + 1)); continue
-            raise
-    raise last
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        if r.status_code == 200:
+            return r.json()
+        print(f"Try {i+1}: HTTP {r.status_code}")
+        if r.status_code in (429, 403, 500, 502, 503):
+            time.sleep(5 * (i + 1)); continue
+        break
+    r.raise_for_status()
 
-def tg(text):
-    data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
-    req = urllib.request.Request(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=data)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read()
+def send_text(text):
+    requests.post(f"{API}/sendMessage", data={"chat_id": CHAT_ID, "text": text}, timeout=30)
+
+def send_photo(buf, caption):
+    files = {"photo": ("p.jpg", buf, "image/jpeg")}
+    requests.post(f"{API}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files=files, timeout=60)
 
 def get_price(p):
     for s in (p.get("sizes") or []):
@@ -49,27 +51,43 @@ def get_price(p):
             return int(p[k]) // 100
     return None
 
+def get_image(nm):
+    vol = nm // 100000
+    part = nm // 1000
+    for b in range(1, 41):
+        url = f"https://basket-{b:02d}.wbbasket.ru/vol{vol}/part{part}/{nm}/images/big/1.webp"
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            if r.status_code == 200 and r.content:
+                img = Image.open(BytesIO(r.content)).convert("RGB")
+                buf = BytesIO(); img.save(buf, format="JPEG", quality=85); buf.seek(0)
+                print("Image from:", url)
+                return buf
+        except Exception:
+            continue
+    print("No image for", nm)
+    return None
+
 def main():
-    params = urllib.parse.urlencode({
+    params = {
         "appType": "1", "curr": "rub", "dest": DEST, "lang": "ru",
         "page": "1", "query": QUERY, "resultset": "catalog",
         "sort": "popular", "spp": "30",
-    })
-    url = f"{SEARCH_URL}?{params}"
+    }
+    url = f"{SEARCH_URL}?{urlencode(params)}"
     print("Requesting:", url)
     try:
         data = get_json(url)
     except Exception as e:
-        tg(f"⚠️ WB не отвечает: {e}")
+        send_text(f"⚠️ WB не отвечает: {e}")
         print("ERROR:", e); sys.exit(1)
 
     root = data.get("data") or data
     products = root.get("products") or []
     print("Products returned:", len(products))
     if not products:
-        tg(f"⚠️ 0 товаров. Ключи ответа: {list(data.keys())}")
-        print("RAW:", json.dumps(data)[:1500]); return
-    print("First product keys:", list(products[0].keys()))
+        send_text(f"⚠️ 0 товаров. Ключи: {list(data.keys())}")
+        return
 
     for p in products:
         rating = p.get("reviewRating") or p.get("rating") or p.get("nmReviewRating") or 0
@@ -79,11 +97,11 @@ def main():
             brand = p.get("brand", ""); price = get_price(p)
             link = f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
             price_str = f"{price} ₽" if price else "цена уточняется"
-            tg(f"🔎 {name}\n{brand}\n⭐ {rating} • отзывов: {fb}\n💰 {price_str}\n{link}")
+            caption = f"🔎 {name}\n{brand}\n⭐ {rating} • отзывов: {fb}\n💰 {price_str}\n{link}"
+            buf = get_image(nm)
+            send_photo(buf, caption) if buf else send_text(caption)
             print("Posted nmId:", nm); return
 
-    tg("⚠️ Товары есть, но фильтр не прошёл никто — смягчим порог.")
-    print("Sample:", json.dumps(products[0])[:800])
+    send_text("⚠️ Товары есть, но фильтр не прошёл.")
 
 main()
-
