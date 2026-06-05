@@ -12,7 +12,7 @@ on:
         default: single
 
 permissions:
-  contents: read
+  contents: write
   models: read
 
 jobs:
