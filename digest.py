@@ -1,5 +1,5 @@
-os, sys, json, time, random, requests
-from io import ко BytesIO
+import os, sys, json, time, random, requests, subprocess
+from io import BytesIO
 from urllib.parse import urlencode
 from PIL import Image
 
@@ -9,8 +9,10 @@ MIN_FB = 150
 MAX_FB = 4000
 DEST = "-1257786"
 SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v18/search"
-POOL_QUERIES = 6
-MAX_POOL = 24
+POOL_QUERIES = 8
+MAX_POOL = 30
+POSTED_FILE = "posted.json"
+COOLDOWN_DAYS = 30
 
 QUERY_BANK = [
     "органайзер для хранения мелочей", "подвесные кармашки для хранения",
@@ -25,6 +27,9 @@ QUERY_BANK = [
     "щетка для чистки межплиточных швов", "многоразовые мешочки для овощей",
     "силиконовые формы для заморозки", "дозатор для моющего средства",
     "гаджеты для кухни экономящие время", "вещи для маленькой квартиры",
+    "подставка для книг для чтения", "плед с рукавами",
+    "держатель для фена настенный", "роллер для лица",
+    "скребок для чистки сковород", "термосумка для обедов",
 ]
 RUBRICS = [
     "решает мелкое бытовое раздражение", "красиво и недорого",
@@ -41,6 +46,30 @@ HEADERS = {
     "Accept": "*/*", "Accept-Language": "ru-RU,ru;q=0.9",
     "Origin": "https://www.wildberries.ru", "Referer": "https://www.wildberries.ru/",
 }
+
+def load_posted():
+    try:
+        with open(POSTED_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_posted(posted):
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        json.dump(posted, f, ensure_ascii=False)
+    try:
+        subprocess.run(["git", "config", "user.name", "bot"], check=False)
+        subprocess.run(["git", "config", "user.email", "bot@local"], check=False)
+        subprocess.run(["git", "add", POSTED_FILE], check=False)
+        subprocess.run(["git", "commit", "-m", "update posted"], check=False)
+        subprocess.run(["git", "push"], check=False)
+    except Exception as e:
+        print("git push failed:", e)
+
+def is_fresh(nm, posted):
+    ts = posted.get(str(nm))
+    if not ts: return True
+    return (time.time() - ts) > COOLDOWN_DAYS * 86400
 
 def wb_search(query, tries=3):
     params = {"appType":"1","curr":"rub","dest":DEST,"lang":"ru","page":"1",
@@ -63,14 +92,15 @@ def get_price(p):
         if p.get(k): return int(p[k])//100
     return None
 
-def collect():
+def collect(posted):
     pool = {}
     for q in random.sample(QUERY_BANK, min(POOL_QUERIES, len(QUERY_BANK))):
         for p in wb_search(q):
             rating = p.get("reviewRating") or p.get("rating") or 0
             fb = p.get("feedbacks") or 0
             nm = p.get("id"); price = get_price(p)
-            if rating>=MIN_RATING and MIN_FB<=fb<=MAX_FB and nm and price:
+            if (rating>=MIN_RATING and MIN_FB<=fb<=MAX_FB and nm and price
+                    and is_fresh(nm, posted)):
                 pool[nm] = {"nmId":nm,"name":(p.get("name") or "")[:80],
                             "brand":p.get("brand",""),"subcat":q,
                             "price":price,"rating":rating,"reviews":fb}
@@ -122,7 +152,7 @@ def tg_album(photos, caption):
         data={"chat_id":CHAT_ID,"media":json.dumps(media, ensure_ascii=False)},
         files=files, timeout=120)
 
-def do_single(cands, rubric):
+def do_single(cands, rubric, posted):
     sysp=("Ты — редактор уютного Telegram-канала о полезных товарах для дома, хранения, быта, "
           f"уюта и красоты. Тема: {rubric}. Выбери ОДИН самый цепляющий товар из списка. "
           "Напиши тёплый живой текст 2-4 предложения о пользе в жизни, без капса и навязчивости, 2-3 эмодзи. "
@@ -135,18 +165,22 @@ def do_single(cands, rubric):
     caption=f"{cap}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']}\n{link}"
     buf=get_image(nm)
     tg_photo(buf, caption) if buf else tg_text(caption)
+    posted[str(nm)] = time.time(); save_posted(posted)
     print("Posted single", nm)
 
-def do_gallery(cands, rubric):
+def do_gallery(cands, rubric, posted):
     sysp=("Ты — редактор уютного Telegram-канала о полезных товарах для дома, хранения, быта, "
-          f"уюта и красоты. Тема подборки: {rubric}. Выбери 5 ПО-НАСТОЯЩЕМУ РАЗНЫХ товара "
-          "(не больше одного на одну subcat). Напиши короткое тёплое вступление (1-2 предложения, 1-2 эмодзи) "
-          "и к каждому товару одну короткую строку пользы (до 12 слов, с эмодзи). "
+          "уюта и красоты. Тебе дан список разных товаров. Выбери 5 МАКСИМАЛЬНО РАЗНЫХ по назначению "
+          "(разные комнаты и задачи: например хранение, кухня, красота, уют — не повторяй тип вещи, "
+          "никаких двух похожих органайзеров/коробок). "
+          "Вступление сделай НЕЙТРАЛЬНЫМ к набору: про подборку полезных находок для дома в целом, "
+          "не привязывай его к одной теме вроде кухни. 1-2 предложения, 1-2 эмодзи. "
+          "К каждому товару — одна короткая строка пользы (до 12 слов, с эмодзи). "
           'Верни ТОЛЬКО JSON без markdown: {"intro":"<текст>","items":[{"nmId":<число>,"line":"<строка>"}]}')
     res=ai_json(sysp, cands)
     by={x["nmId"]:x for x in cands}
     lines=[(res.get("intro") or "").strip(), ""]
-    photos=[]; n=0
+    photos=[]; n=0; used=[]
     for it in (res.get("items") or [])[:5]:
         try: nm=int(it["nmId"])
         except Exception: continue
@@ -154,24 +188,28 @@ def do_gallery(cands, rubric):
         if not c: continue
         buf=get_image(nm)
         if not buf: continue
-        n+=1; photos.append(buf)
+        n+=1; photos.append(buf); used.append(nm)
         link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
         lines.append(f"{n}. {(it.get('line') or '').strip()} — {c['price']} ₽\n{link}")
     caption="\n".join(lines)
     if len(photos)>=2: tg_album(photos, caption); print("Posted gallery", len(photos))
     elif len(photos)==1: tg_photo(photos[0], caption)
-    else: tg_text(caption)
+    else: tg_text(caption); return
+    for nm in used: posted[str(nm)] = time.time()
+    save_posted(posted)
 
 def main():
-    cands=collect()
+    posted = load_posted()
+    cands=collect(posted)
     print("Candidates:", len(cands), "MODE:", MODE)
     need = 5 if MODE=="gallery" else 3
     if len(cands) < need:
-        tg_text(f"⚠️ Мало кандидатов ({len(cands)})."); return
+        tg_text(f"⚠️ Мало свежих кандидатов ({len(cands)})."); return
     rubric=random.choice(RUBRICS); print("Rubric:", rubric)
     try:
-        do_gallery(cands, rubric) if MODE=="gallery" else do_single(cands, rubric)
+        do_gallery(cands, rubric, posted) if MODE=="gallery" else do_single(cands, rubric, posted)
     except Exception as e:
         tg_text(f"⚠️ Сбой ({MODE}): {e}"); print("ERROR:", e); raise
 
 main()
+
