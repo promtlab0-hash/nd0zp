@@ -31,4 +31,5 @@ jobs:
           GH_MODELS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "@nahodki_do_zp"
+          ALERT_CHAT_ID: ${{ secrets.ALERT_CHAT_ID }}
         run: python digest.py
