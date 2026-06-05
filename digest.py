@@ -3,7 +3,6 @@ from io import BytesIO
 from urllib.parse import urlencode
 from PIL import Image
 
-MODE = os.environ.get("MODE", "single").strip() or "single"
 MIN_RATING = 4.7
 MIN_FB = 150
 MAX_FB = 4000
@@ -15,38 +14,37 @@ MAX_POOL = 28
 PER_QUERY_CAP = 3
 PER_THEME_POOL_CAP = 3
 POSTED_FILE = "posted.json"
+DONE_FILE = "done.json"
 COOLDOWN_DAYS = 30
+MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini"]
+LAST_ATTEMPT = 4
+
+SCHEDULE_MAP = {
+    "30 5 * * *": ("morning","single",1), "50 5 * * *": ("morning","single",2),
+    "10 6 * * *": ("morning","single",3), "30 6 * * *": ("morning","single",4),
+    "0 10 * * *": ("noon","single",1), "20 10 * * *": ("noon","single",2),
+    "40 10 * * *": ("noon","single",3), "0 11 * * *": ("noon","single",4),
+    "0 18 * * *": ("evening","gallery",1), "20 18 * * *": ("evening","gallery",2),
+    "40 18 * * *": ("evening","gallery",3), "0 19 * * *": ("evening","gallery",4),
+}
 
 THEMES = {
-    "хранение": ["органайзер для хранения мелочей","подвесные кармашки для хранения",
-                 "разделители для ящиков комода","коробки для хранения вещей складные"],
-    "под кроватью": ["ящик под кровать на колесах","вакуумные пакеты для одежды",
-                     "кофр для хранения сезонных вещей"],
-    "кухня хранение": ["контейнер для специй с дозатором","банки для сыпучих продуктов",
-                       "органайзер для крышек от кастрюль"],
-    "кухня помощь": ["многоразовые мешочки для овощей","силиконовые формы для заморозки",
-                     "гаджеты для кухни экономящие время","измельчитель чеснока ручной"],
-    "посуда": ["коврик для сушки посуды","подставка под горячее силиконовая",
-               "контейнеры для еды с разделителями"],
-    "уют свет": ["гирлянда теплый свет для спальни","ночник проектор звездное небо",
-                 "лампа настольная с регулировкой"],
+    "хранение": ["органайзер для хранения мелочей","подвесные кармашки для хранения","разделители для ящиков комода","коробки для хранения вещей складные"],
+    "под кроватью": ["ящик под кровать на колесах","вакуумные пакеты для одежды","кофр для хранения сезонных вещей"],
+    "кухня хранение": ["контейнер для специй с дозатором","банки для сыпучих продуктов","органайзер для крышек от кастрюль"],
+    "кухня помощь": ["многоразовые мешочки для овощей","силиконовые формы для заморозки","гаджеты для кухни экономящие время","измельчитель чеснока ручной"],
+    "посуда": ["коврик для сушки посуды","подставка под горячее силиконовая","контейнеры для еды с разделителями"],
+    "уют свет": ["гирлянда теплый свет для спальни","ночник проектор звездное небо","лампа настольная с регулировкой"],
     "уют текстиль": ["коврик с длинным ворсом","плед с рукавами","декоративные наволочки"],
-    "отдых": ["подставка для книг для чтения","столик для завтрака в кровать",
-              "маска для сна с эффектом 3д"],
+    "отдых": ["подставка для книг для чтения","столик для завтрака в кровать","маска для сна с эффектом 3д"],
     "ароматы": ["аромадиффузор автоматический","саше ароматическое для дома","свеча ароматическая"],
-    "красота волосы": ["массажер для кожи головы","силиконовые бигуди без нагрева",
-                       "держатель для фена настенный"],
-    "красота уход": ["органайзер для косметики вращающийся","зеркало с подсветкой настольное",
-                     "роллер для лица","щетка для сухого массажа"],
-    "уборка": ["щетка для чистки межплиточных швов","дозатор для моющего средства",
-               "скребок для чистки сковород","салфетки из микрофибры набор"],
-    "ванная": ["угловая полка в ванную без сверления","держатель для зубных щеток",
-               "коврик в ванную быстросохнущий"],
-    "дом мелочи": ["магнитная сетка от комаров на дверь","крючки для одежды без сверления",
-                   "вещи для маленькой квартиры","органайзер для проводов"],
+    "красота волосы": ["массажер для кожи головы","силиконовые бигуди без нагрева","держатель для фена настенный"],
+    "красота уход": ["органайзер для косметики вращающийся","зеркало с подсветкой настольное","роллер для лица","щетка для сухого массажа"],
+    "уборка": ["щетка для чистки межплиточных швов","дозатор для моющего средства","скребок для чистки сковород","салфетки из микрофибры набор"],
+    "ванная": ["угловая полка в ванную без сверления","держатель для зубных щеток","коврик в ванную быстросохнущий"],
+    "дом мелочи": ["магнитная сетка от комаров на дверь","крючки для одежды без сверления","вещи для маленькой квартиры","органайзер для проводов"],
 }
-RUBRICS = ["решает мелкое бытовое раздражение","красиво и недорого","неожиданная находка",
-           "для маленькой квартиры","экономит время на кухне","для уютного вечера дома"]
+RUBRICS = ["решает мелкое бытовое раздражение","красиво и недорого","неожиданная находка","для маленькой квартиры","экономит время на кухне","для уютного вечера дома"]
 
 GH_TOKEN = os.environ["GH_MODELS_TOKEN"]
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -59,33 +57,38 @@ HEADERS = {
     "Origin": "https://www.wildberries.ru", "Referer": "https://www.wildberries.ru/",
 }
 
-def load_posted():
+def load_json(path):
     try:
-        with open(POSTED_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+        with open(path, encoding="utf-8") as f: return json.load(f)
+    except Exception: return {}
 
-def save_posted(posted):
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(posted, f, ensure_ascii=False)
-    for cmd in (["git","config","user.name","bot"], ["git","config","user.email","bot@local"],
-                ["git","add",POSTED_FILE], ["git","commit","-m","update posted"], ["git","push"]):
+def prune_done(done):
+    cut = time.strftime("%Y-%m-%d", time.gmtime(time.time()-5*86400))
+    return {k:v for k,v in done.items() if k.split(":")[0] >= cut}
+
+def persist(posted, done):
+    with open(POSTED_FILE,"w",encoding="utf-8") as f: json.dump(posted,f,ensure_ascii=False)
+    with open(DONE_FILE,"w",encoding="utf-8") as f: json.dump(done,f,ensure_ascii=False)
+    for cmd in (["git","config","user.name","bot"],["git","config","user.email","bot@local"],
+                ["git","add",POSTED_FILE,DONE_FILE],["git","commit","-m","state"],["git","push"]):
         subprocess.run(cmd, check=False)
 
 def is_fresh(nm, posted):
     ts = posted.get(str(nm))
-    return True if not ts else (time.time() - ts) > COOLDOWN_DAYS * 86400
+    return True if not ts else (time.time()-ts) > COOLDOWN_DAYS*86400
 
 def wb_search(query, tries=3):
     params = {"appType":"1","curr":"rub","dest":DEST,"lang":"ru","page":"1",
               "query":query,"resultset":"catalog","sort":"popular","spp":"30"}
     url = f"{SEARCH_URL}?{urlencode(params)}"
     for i in range(tries):
-        r = requests.get(url, headers=HEADERS, timeout=30)
-        if r.status_code == 200:
-            j = r.json(); root = j.get("data") or j
-            return root.get("products") or []
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if r.status_code == 200:
+                j = r.json(); root = j.get("data") or j
+                return root.get("products") or []
+        except Exception as e:
+            print("wb err:", e)
         time.sleep(3*(i+1))
     return []
 
@@ -98,16 +101,19 @@ def get_price(p):
         if p.get(k): return int(p[k])//100
     return None
 
-def collect(posted):
+def collect(posted, relaxed=False):
+    max_fb = 50000 if relaxed else MAX_FB
+    max_price = 3000 if relaxed else MAX_PRICE
+    pool_queries = 14 if relaxed else POOL_QUERIES
     pool = {}; theme_count = {}; plan = []
     themes = list(THEMES.keys()); random.shuffle(themes)
     iters = {t: iter(random.sample(THEMES[t], len(THEMES[t]))) for t in themes}
     active = list(themes)
-    while len(plan) < POOL_QUERIES and active:
+    while len(plan) < pool_queries and active:
         for t in list(active):
             try:
                 plan.append((t, next(iters[t])))
-                if len(plan) >= POOL_QUERIES: break
+                if len(plan) >= pool_queries: break
             except StopIteration:
                 active.remove(t)
     for theme, q in plan:
@@ -116,8 +122,8 @@ def collect(posted):
             rating = p.get("reviewRating") or p.get("rating") or 0
             fb = p.get("feedbacks") or 0
             nm = p.get("id"); price = get_price(p)
-            if (rating>=MIN_RATING and MIN_FB<=fb<=MAX_FB and price and price<=MAX_PRICE
-                    and nm and is_fresh(nm, posted) and nm not in pool
+            if (rating>=MIN_RATING and MIN_FB<=fb<=max_fb and price and price<=max_price
+                    and nm and is_fresh(nm,posted) and nm not in pool
                     and theme_count.get(theme,0) < PER_THEME_POOL_CAP):
                 pool[nm] = {"nmId":nm,"name":(p.get("name") or "")[:80],"brand":p.get("brand",""),
                             "theme":theme,"price":price,"rating":rating,"reviews":fb}
@@ -142,16 +148,23 @@ def get_image(nm):
     return None
 
 def ai_json(system, user_obj):
-    body = {"model":"openai/gpt-4o","temperature":0.8,
-        "messages":[{"role":"system","content":system},
-                    {"role":"user","content":json.dumps(user_obj, ensure_ascii=False)}]}
-    r = requests.post("https://models.github.ai/inference/chat/completions",
-        headers={"Authorization":f"Bearer {GH_TOKEN}","Content-Type":"application/json",
-                 "Accept":"application/vnd.github+json"},
-        data=json.dumps(body).encode(), timeout=90)
-    r.raise_for_status()
-    txt = r.json()["choices"][0]["message"]["content"].strip()
-    return json.loads(txt.replace("```json","").replace("```","").strip())
+    last=None
+    for model in MODELS:
+        for attempt in range(2):
+            try:
+                body = {"model":model,"temperature":0.8,
+                    "messages":[{"role":"system","content":system},
+                                {"role":"user","content":json.dumps(user_obj, ensure_ascii=False)}]}
+                r = requests.post("https://models.github.ai/inference/chat/completions",
+                    headers={"Authorization":f"Bearer {GH_TOKEN}","Content-Type":"application/json",
+                             "Accept":"application/vnd.github+json"},
+                    data=json.dumps(body).encode(), timeout=90)
+                r.raise_for_status()
+                txt = r.json()["choices"][0]["message"]["content"].strip()
+                return json.loads(txt.replace("```json","").replace("```","").strip())
+            except Exception as e:
+                last=e; print(f"AI fail {model} #{attempt+1}:", e); time.sleep(3)
+    raise last
 
 def tg_text(t):
     requests.post(f"{API}/sendMessage", data={"chat_id":CHAT_ID,"text":t}, timeout=30)
@@ -174,6 +187,28 @@ def tg_album(photos, caption):
     requests.post(f"{API}/sendMediaGroup",
         data={"chat_id":CHAT_ID,"media":json.dumps(media, ensure_ascii=False)}, files=files, timeout=120)
 
+def post_single(nm, cap, c, posted):
+    link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
+    caption=f"{cap}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']}\n{link}"
+    buf=get_image(nm)
+    tg_photo(buf, caption) if buf else tg_text(caption)
+    posted[str(nm)] = time.time()
+    return True
+
+def post_gallery(intro, items, posted):
+    lines=[intro,""]; photos=[]; n=0
+    for nm, line, c in items:
+        buf=get_image(nm)
+        if not buf: continue
+        n+=1; photos.append(buf)
+        link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
+        lines.append(f"{n}. {line} — {c['price']} ₽\n{link}")
+        posted[str(nm)] = time.time()
+    caption="\n".join(lines)
+    if len(photos)>=2: tg_album(photos, caption); return True
+    if len(photos)==1: tg_photo(photos[0], caption); return True
+    return False
+
 def do_single(cands, rubric, posted):
     sysp=("Ты — редактор уютного Telegram-канала о полезных недорогих товарах для дома, хранения, быта, "
           f"уюта и красоты. Тема: {rubric}. Выбери ОДИН самый цепляющий товар. "
@@ -182,20 +217,14 @@ def do_single(cands, rubric, posted):
     pick=ai_json(sysp, cands)
     nm=int(pick["nmId"]); cap=(pick.get("caption") or "").strip()
     c={x["nmId"]:x for x in cands}.get(nm)
-    if not c or not cap: alert("⚠️ ИИ вернул некорректный выбор."); return
-    link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
-    caption=f"{cap}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']}\n{link}"
-    buf=get_image(nm)
-    tg_photo(buf, caption) if buf else tg_text(caption)
-    posted[str(nm)] = time.time(); save_posted(posted)
-    print("Posted single", nm)
+    if not c or not cap: return False
+    return post_single(nm, cap, c, posted)
 
 def do_gallery(cands, rubric, posted):
     sysp=("Ты — редактор уютного Telegram-канала о полезных недорогих товарах для дома. "
-          "У каждого товара есть поле theme. Выбери до 8 лучших товаров и ранжируй от самого интересного, "
-          "стараясь охватить РАЗНЫЕ theme. Вступление НЕЙТРАЛЬНОЕ к набору: про подборку полезных находок "
-          "для дома в целом, 1-2 предложения, 1-2 эмодзи. К каждому товару — одна короткая строка пользы "
-          "(до 12 слов, с эмодзи). "
+          "У каждого товара есть поле theme. Выбери до 8 лучших товаров из РАЗНЫХ theme, ранжируй от "
+          "самого интересного. Вступление НЕЙТРАЛЬНОЕ к набору, про подборку находок для дома в целом, "
+          "1-2 предложения, 1-2 эмодзи. К каждому товару — короткая строка пользы (до 12 слов, с эмодзи). "
           'Верни ТОЛЬКО JSON: {"intro":"<текст>","items":[{"nmId":<число>,"line":"<строка>"}]}')
     res=ai_json(sysp, cands)
     by={x["nmId"]:x for x in cands}
@@ -212,34 +241,71 @@ def do_gallery(cands, rubric, posted):
             if c["theme"] in used: continue
             used.add(c["theme"]); chosen.append((c["nmId"], c["name"], c))
             if len(chosen)>=5: break
+    if len(chosen)<2: return False
     intro=(res.get("intro") or "Подборка полезных находок для дома 🏡").strip()
-    lines=[intro, ""]; photos=[]; n=0; used_nm=[]
-    for nm, line, c in chosen:
-        buf=get_image(nm)
-        if not buf: continue
-        n+=1; photos.append(buf); used_nm.append(nm)
-        link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
-        lines.append(f"{n}. {line} — {c['price']} ₽\n{link}")
-    caption="\n".join(lines)
-    if len(photos)>=2: tg_album(photos, caption); print("Posted gallery", len(photos))
-    elif len(photos)==1: tg_photo(photos[0], caption)
-    else: tg_text(caption); return
-    for nm in used_nm: posted[str(nm)] = time.time()
-    save_posted(posted)
+    return post_gallery(intro, chosen, posted)
+
+def simple_single(cands, posted):
+    c=max(cands, key=lambda x: x["reviews"])
+    return post_single(c["nmId"], c["name"], c, posted)
+
+def simple_gallery(cands, posted):
+    chosen=[]; used=set()
+    for c in cands:
+        if c["theme"] in used: continue
+        used.add(c["theme"]); chosen.append((c["nmId"], c["name"], c))
+        if len(chosen)>=5: break
+    return post_gallery("Подборка полезных находок для дома 🏡", chosen, posted)
+
+def resolve_slot():
+    m=os.environ.get("EVENT_INPUT_MODE","").strip()
+    if m: return ("manual", m, LAST_ATTEMPT)
+    sched=os.environ.get("EVENT_SCHEDULE","").strip()
+    return SCHEDULE_MAP.get(sched, ("manual","single",LAST_ATTEMPT))
 
 def main():
-    posted = load_posted()
-    cands=collect(posted)
-    print("Candidates:", len(cands), "MODE:", MODE)
-    need = 5 if MODE=="gallery" else 3
+    posted = load_json(POSTED_FILE)
+    done = prune_done(load_json(DONE_FILE))
+    slot, mode, attempt = resolve_slot()
+    is_last = attempt >= LAST_ATTEMPT
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    key = f"{today}:{slot}"
+    print("slot:", slot, "mode:", mode, "attempt:", attempt)
+    if slot != "manual" and done.get(key):
+        print("already done:", key); return
+
+    cands = collect(posted, relaxed=False)
+    need = 5 if mode=="gallery" else 3
     if len(cands) < need:
-        alert(f"⚠️ Мало свежих кандидатов ({len(cands)})."); return
-    rubric=random.choice(RUBRICS); print("Rubric:", rubric)
+        cands = collect(posted, relaxed=True)
+    print("Candidates:", len(cands))
+    if len(cands) < (2 if mode=="gallery" else 1):
+        if is_last: alert(f"⚠️ Слот «{slot}»: нет товаров, пост пропущен.")
+        else: print("not enough, retry later")
+        return
+
+    rubric = random.choice(RUBRICS)
+    ok = False
     try:
-        do_gallery(cands, rubric, posted) if MODE=="gallery" else do_single(cands, rubric, posted)
+        ok = do_gallery(cands, rubric, posted) if mode=="gallery" else do_single(cands, rubric, posted)
     except Exception as e:
-        alert(f"⚠️ Сбой ({MODE}): {e}"); print("ERROR:", e); raise
+        print("quality path failed:", e); ok = False
+
+    if ok:
+        done[key] = time.time(); persist(posted, done); print("posted:", key); return
+
+    if not is_last:
+        print("quality failed, will retry next slot"); return
+
+    try:
+        (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
+        done[key] = time.time(); persist(posted, done)
+        alert(f"ℹ️ Слот «{slot}»: ИИ не ответил, вышел резервный пост без живого текста.")
+    except Exception as e:
+        alert(f"⚠️ Слот «{slot}»: не удалось выпустить пост ({e}).")
 
 main()
+
+
 
 
