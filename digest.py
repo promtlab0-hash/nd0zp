@@ -9,10 +9,10 @@ MAX_FB = 4000
 MAX_PRICE = 2000
 DEST = "-1257786"
 SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v18/search"
-POOL_QUERIES = 10
-MAX_POOL = 28
-PER_QUERY_CAP = 3
-PER_THEME_POOL_CAP = 3
+POOL_QUERIES = 12
+MAX_POOL = 24
+PER_QUERY_CAP = 2
+PER_THEME_POOL_CAP = 1
 POSTED_FILE = "posted.json"
 DONE_FILE = "done.json"
 COOLDOWN_DAYS = 30
@@ -29,20 +29,28 @@ SCHEDULE_MAP = {
 }
 
 THEMES = {
-    "хранение": ["органайзер для хранения мелочей","подвесные кармашки для хранения","разделители для ящиков комода","коробки для хранения вещей складные"],
-    "под кроватью": ["ящик под кровать на колесах","вакуумные пакеты для одежды","кофр для хранения сезонных вещей"],
-    "кухня хранение": ["контейнер для специй с дозатором","банки для сыпучих продуктов","органайзер для крышек от кастрюль"],
-    "кухня помощь": ["многоразовые мешочки для овощей","силиконовые формы для заморозки","гаджеты для кухни экономящие время","измельчитель чеснока ручной"],
-    "посуда": ["коврик для сушки посуды","подставка под горячее силиконовая","контейнеры для еды с разделителями"],
-    "уют свет": ["гирлянда теплый свет для спальни","ночник проектор звездное небо","лампа настольная с регулировкой"],
-    "уют текстиль": ["коврик с длинным ворсом","плед с рукавами","декоративные наволочки"],
-    "отдых": ["подставка для книг для чтения","столик для завтрака в кровать","маска для сна с эффектом 3д"],
-    "ароматы": ["аромадиффузор автоматический","саше ароматическое для дома","свеча ароматическая"],
-    "красота волосы": ["массажер для кожи головы","силиконовые бигуди без нагрева","держатель для фена настенный"],
-    "красота уход": ["органайзер для косметики вращающийся","зеркало с подсветкой настольное","роллер для лица","щетка для сухого массажа"],
-    "уборка": ["щетка для чистки межплиточных швов","дозатор для моющего средства","скребок для чистки сковород","салфетки из микрофибры набор"],
-    "ванная": ["угловая полка в ванную без сверления","держатель для зубных щеток","коврик в ванную быстросохнущий"],
-    "дом мелочи": ["магнитная сетка от комаров на дверь","крючки для одежды без сверления","вещи для маленькой квартиры","органайзер для проводов"],
+    "органайзеры": ["органайзер для хранения мелочей","разделители для ящиков комода"],
+    "коробки": ["коробки для хранения вещей складные","корзина для белья складная"],
+    "под кроватью": ["ящик под кровать на колесах","кофр для хранения сезонных вещей"],
+    "вакуум": ["вакуумные пакеты для одежды"],
+    "специи": ["контейнер для специй с дозатором","банки для сыпучих продуктов"],
+    "кухонные гаджеты": ["измельчитель чеснока ручной","овощечистка экономка","открывашка для банок"],
+    "заморозка": ["силиконовые формы для заморозки","контейнеры для еды с разделителями"],
+    "посуда уход": ["коврик для сушки посуды","подставка под горячее силиконовая"],
+    "свет": ["гирлянда теплый свет для спальни","ночник проектор звездное небо","лампа настольная"],
+    "текстиль": ["коврик с длинным ворсом","плед с рукавами","декоративные наволочки"],
+    "сон отдых": ["подставка для книг для чтения","столик для завтрака в кровать","маска для сна 3д"],
+    "ароматы": ["аромадиффузор автоматический","свеча ароматическая"],
+    "волосы": ["массажер для кожи головы","силиконовые бигуди без нагрева","расческа массажная"],
+    "косметика хранение": ["органайзер для косметики вращающийся","зеркало с подсветкой настольное"],
+    "уход тело": ["роллер для лица","щетка для сухого массажа"],
+    "уборка кухня": ["скребок для чистки сковород","щетка для чистки межплиточных швов"],
+    "уборка тряпки": ["салфетки из микрофибры набор","швабра с отжимом"],
+    "ванная": ["угловая полка в ванную без сверления","коврик в ванную быстросохнущий","держатель для зубных щеток"],
+    "крючки": ["крючки для одежды без сверления","вешалка органайзер для шарфов"],
+    "провода": ["органайзер для проводов","держатель для телефона настольный"],
+    "от насекомых": ["магнитная сетка от комаров на дверь","ловушка для мошек"],
+    "эко": ["многоразовые мешочки для овощей","экомешочки для хранения"],
 }
 RUBRICS = ["решает мелкое бытовое раздражение","красиво и недорого","неожиданная находка","для маленькой квартиры","экономит время на кухне","для уютного вечера дома"]
 
@@ -104,7 +112,7 @@ def get_price(p):
 def collect(posted, relaxed=False):
     max_fb = 50000 if relaxed else MAX_FB
     max_price = 3000 if relaxed else MAX_PRICE
-    pool_queries = 14 if relaxed else POOL_QUERIES
+    pool_queries = len(THEMES) if relaxed else POOL_QUERIES
     pool = {}; theme_count = {}; plan = []
     themes = list(THEMES.keys()); random.shuffle(themes)
     iters = {t: iter(random.sample(THEMES[t], len(THEMES[t]))) for t in themes}
@@ -117,6 +125,7 @@ def collect(posted, relaxed=False):
             except StopIteration:
                 active.remove(t)
     for theme, q in plan:
+        if theme_count.get(theme,0) >= PER_THEME_POOL_CAP: continue
         added = 0
         for p in wb_search(q):
             rating = p.get("reviewRating") or p.get("rating") or 0
@@ -129,7 +138,7 @@ def collect(posted, relaxed=False):
                             "theme":theme,"price":price,"rating":rating,"reviews":fb}
                 theme_count[theme] = theme_count.get(theme,0)+1
                 added += 1
-                if added >= PER_QUERY_CAP: break
+                if added >= PER_QUERY_CAP or theme_count.get(theme,0) >= PER_THEME_POOL_CAP: break
         if len(pool) >= MAX_POOL: break
     return list(pool.values())[:MAX_POOL]
 
@@ -166,15 +175,23 @@ def ai_json(system, user_obj):
                 last=e; print(f"AI fail {model} #{attempt+1}:", e); time.sleep(3)
     raise last
 
+def esc(t):
+    return t.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
+def link(nm):
+    return f'<a href="https://www.wildberries.ru/catalog/{nm}/detail.aspx">смотреть</a>'
+
 def tg_text(t):
-    requests.post(f"{API}/sendMessage", data={"chat_id":CHAT_ID,"text":t}, timeout=30)
+    requests.post(f"{API}/sendMessage",
+        data={"chat_id":CHAT_ID,"text":t,"parse_mode":"HTML","disable_web_page_preview":"true"}, timeout=30)
 
 def alert(t):
     target = ALERT_CHAT_ID or CHAT_ID
     requests.post(f"{API}/sendMessage", data={"chat_id":target,"text":t}, timeout=30)
 
 def tg_photo(buf, caption):
-    requests.post(f"{API}/sendPhoto", data={"chat_id":CHAT_ID,"caption":caption[:1000]},
+    requests.post(f"{API}/sendPhoto",
+        data={"chat_id":CHAT_ID,"caption":caption[:1000],"parse_mode":"HTML"},
         files={"photo":("p.jpg",buf,"image/jpeg")}, timeout=60)
 
 def tg_album(photos, caption):
@@ -182,27 +199,25 @@ def tg_album(photos, caption):
     for i,buf in enumerate(photos):
         key=f"p{i}"; files[key]=(f"{key}.jpg",buf,"image/jpeg")
         m={"type":"photo","media":f"attach://{key}"}
-        if i==0: m["caption"]=caption[:1024]
+        if i==0: m["caption"]=caption[:1024]; m["parse_mode"]="HTML"
         media.append(m)
     requests.post(f"{API}/sendMediaGroup",
         data={"chat_id":CHAT_ID,"media":json.dumps(media, ensure_ascii=False)}, files=files, timeout=120)
 
 def post_single(nm, cap, c, posted):
-    link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
-    caption=f"{cap}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']}\n{link}"
+    caption=f"{esc(cap)}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']} → {link(nm)}"
     buf=get_image(nm)
     tg_photo(buf, caption) if buf else tg_text(caption)
     posted[str(nm)] = time.time()
     return True
 
 def post_gallery(intro, items, posted):
-    lines=[intro,""]; photos=[]; n=0
+    lines=[esc(intro),""]; photos=[]; n=0
     for nm, line, c in items:
         buf=get_image(nm)
         if not buf: continue
         n+=1; photos.append(buf)
-        link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
-        lines.append(f"{n}. {line} — {c['price']} ₽\n{link}")
+        lines.append(f"{n}. {esc(line)} — {c['price']} ₽ → {link(nm)}")
         posted[str(nm)] = time.time()
     caption="\n".join(lines)
     if len(photos)>=2: tg_album(photos, caption); return True
@@ -222,8 +237,8 @@ def do_single(cands, rubric, posted):
 
 def do_gallery(cands, rubric, posted):
     sysp=("Ты — редактор уютного Telegram-канала о полезных недорогих товарах для дома. "
-          "У каждого товара есть поле theme. Выбери до 8 лучших товаров из РАЗНЫХ theme, ранжируй от "
-          "самого интересного. Вступление НЕЙТРАЛЬНОЕ к набору, про подборку находок для дома в целом, "
+          "У каждого товара есть поле theme. Выбери 5 товаров из РАЗНЫХ theme, максимально разные по виду "
+          "и назначению. Вступление НЕЙТРАЛЬНОЕ к набору, про подборку находок для дома в целом, "
           "1-2 предложения, 1-2 эмодзи. К каждому товару — короткая строка пользы (до 12 слов, с эмодзи). "
           'Верни ТОЛЬКО JSON: {"intro":"<текст>","items":[{"nmId":<число>,"line":"<строка>"}]}')
     res=ai_json(sysp, cands)
@@ -305,7 +320,3 @@ def main():
         alert(f"⚠️ Слот «{slot}»: не удалось выпустить пост ({e}).")
 
 main()
-
-
-
-
