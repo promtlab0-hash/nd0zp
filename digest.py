@@ -51,6 +51,7 @@ RUBRICS = ["решает мелкое бытовое раздражение","к
 GH_TOKEN = os.environ["GH_MODELS_TOKEN"]
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@nahodki_do_zp")
+ALERT_CHAT_ID = os.environ.get("ALERT_CHAT_ID", "")
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
@@ -155,6 +156,10 @@ def ai_json(system, user_obj):
 def tg_text(t):
     requests.post(f"{API}/sendMessage", data={"chat_id":CHAT_ID,"text":t}, timeout=30)
 
+def alert(t):
+    target = ALERT_CHAT_ID or CHAT_ID
+    requests.post(f"{API}/sendMessage", data={"chat_id":target,"text":t}, timeout=30)
+
 def tg_photo(buf, caption):
     requests.post(f"{API}/sendPhoto", data={"chat_id":CHAT_ID,"caption":caption[:1000]},
         files={"photo":("p.jpg",buf,"image/jpeg")}, timeout=60)
@@ -177,7 +182,7 @@ def do_single(cands, rubric, posted):
     pick=ai_json(sysp, cands)
     nm=int(pick["nmId"]); cap=(pick.get("caption") or "").strip()
     c={x["nmId"]:x for x in cands}.get(nm)
-    if not c or not cap: tg_text("⚠️ ИИ вернул некорректный выбор."); return
+    if not c or not cap: alert("⚠️ ИИ вернул некорректный выбор."); return
     link=f"https://www.wildberries.ru/catalog/{nm}/detail.aspx"
     caption=f"{cap}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']}\n{link}"
     buf=get_image(nm)
@@ -228,12 +233,12 @@ def main():
     print("Candidates:", len(cands), "MODE:", MODE)
     need = 5 if MODE=="gallery" else 3
     if len(cands) < need:
-        tg_text(f"⚠️ Мало свежих кандидатов ({len(cands)})."); return
+        alert(f"⚠️ Мало свежих кандидатов ({len(cands)})."); return
     rubric=random.choice(RUBRICS); print("Rubric:", rubric)
     try:
         do_gallery(cands, rubric, posted) if MODE=="gallery" else do_single(cands, rubric, posted)
     except Exception as e:
-        tg_text(f"⚠️ Сбой ({MODE}): {e}"); print("ERROR:", e); raise
+        alert(f"⚠️ Сбой ({MODE}): {e}"); print("ERROR:", e); raise
 
 main()
 
