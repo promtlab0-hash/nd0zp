@@ -6,6 +6,7 @@ from PIL import Image
 MIN_RATING = 4.7
 MIN_FB = 150
 MAX_FB = 4000
+MIN_PRICE = 100
 MAX_PRICE = 3000
 DEST = "-1257786"
 SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v18/search"
@@ -145,11 +146,20 @@ def wb_search(query, tries=3):
 def get_price(p):
     for s in (p.get("sizes") or []):
         pr = s.get("price") or {}
-        for k in ("product","total","basic"):
+        for k in ("total","product"):
             if pr.get(k): return int(pr[k])//100
+    for s in (p.get("sizes") or []):
+        pr = s.get("price") or {}
+        if pr.get("basic"): return int(pr["basic"])//100
     for k in ("salePriceU","priceU"):
         if p.get(k): return int(p[k])//100
     return None
+
+def price_from(price):
+    # округление вниз до 50 ₽; формат "от X ₽"
+    floor = (price // 50) * 50
+    if floor < MIN_PRICE: floor = MIN_PRICE
+    return f"от {floor} ₽"
 
 def collect(posted, relaxed=False):
     max_fb = 50000 if relaxed else MAX_FB
@@ -173,7 +183,7 @@ def collect(posted, relaxed=False):
             rating = p.get("reviewRating") or p.get("rating") or 0
             fb = p.get("feedbacks") or 0
             nm = p.get("id"); price = get_price(p)
-            if (rating>=MIN_RATING and MIN_FB<=fb<=max_fb and price and price<=max_price
+            if (rating>=MIN_RATING and MIN_FB<=fb<=max_fb and price and MIN_PRICE<=price<=max_price
                     and nm and is_fresh(nm,posted) and nm not in pool
                     and theme_count.get(theme,0) < PER_THEME_POOL_CAP):
                 pool[nm] = {"nmId":nm,"name":(p.get("name") or "")[:80],"brand":p.get("brand",""),
@@ -254,7 +264,7 @@ def tg_album(photos, caption):
         data={"chat_id":CHAT_ID,"media":json.dumps(media, ensure_ascii=False)}, files=files, timeout=120)
 
 def post_single(nm, cap, c, posted):
-    caption=f"{esc(clean(cap))}\n\n💰 {c['price']} ₽ → {link(nm)}"
+    caption=f"{esc(clean(cap))}\n\n💰 {price_from(c['price'])} → {link(nm)}"
     buf=get_image(nm)
     tg_photo(buf, caption) if buf else tg_text(caption)
     posted[str(nm)] = time.time()
@@ -266,7 +276,7 @@ def post_gallery(intro, items, posted):
         buf=get_image(nm)
         if not buf: continue
         n+=1; photos.append(buf)
-        lines.append(f"{n}. {esc(clean(line))} — {c['price']} ₽ → {link(nm)}")
+        lines.append(f"{n}. {esc(clean(line))} — {price_from(c['price'])} → {link(nm)}")
         posted[str(nm)] = time.time()
     caption="\n".join(lines)
     if len(photos)>=2: tg_album(photos, caption); return True
