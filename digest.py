@@ -1,4 +1,4 @@
-import os, sys, json, time, random, requests, subprocess
+import os, sys, json, time, random, requests, subprocess, re
 from io import BytesIO
 from urllib.parse import urlencode
 from PIL import Image
@@ -178,6 +178,15 @@ def ai_json(system, user_obj):
 def esc(t):
     return t.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
+def clean(t):
+    t = t.strip()
+    # убрать точку перед финальным смайликом: "текст. 🧺" / "текст . 🧺" -> "текст 🧺"
+    t = re.sub(r"\.\s*([^\w\s.,!?]+)\s*$", r" \1", t)
+    # убрать пробелы/точку в самом конце (внутренние точки между предложениями не трогаем)
+    while t and t[-1] in " .":
+        t = t[:-1]
+    return t.strip()
+
 def link(nm):
     return f'<a href="https://www.wildberries.ru/catalog/{nm}/detail.aspx">смотреть</a>'
 
@@ -205,19 +214,19 @@ def tg_album(photos, caption):
         data={"chat_id":CHAT_ID,"media":json.dumps(media, ensure_ascii=False)}, files=files, timeout=120)
 
 def post_single(nm, cap, c, posted):
-    caption=f"{esc(cap)}\n\n💰 {c['price']} ₽ • ⭐ {c['rating']} → {link(nm)}"
+    caption=f"{esc(clean(cap))}\n\n💰 {c['price']} ₽ → {link(nm)}"
     buf=get_image(nm)
     tg_photo(buf, caption) if buf else tg_text(caption)
     posted[str(nm)] = time.time()
     return True
 
 def post_gallery(intro, items, posted):
-    lines=[esc(intro),""]; photos=[]; n=0
+    lines=[esc(clean(intro)),""]; photos=[]; n=0
     for nm, line, c in items:
         buf=get_image(nm)
         if not buf: continue
         n+=1; photos.append(buf)
-        lines.append(f"{n}. {esc(line)} — {c['price']} ₽ → {link(nm)}")
+        lines.append(f"{n}. {esc(clean(line))} — {c['price']} ₽ → {link(nm)}")
         posted[str(nm)] = time.time()
     caption="\n".join(lines)
     if len(photos)>=2: tg_album(photos, caption); return True
@@ -228,6 +237,7 @@ def do_single(cands, rubric, posted):
     sysp=("Ты — редактор уютного Telegram-канала о полезных недорогих товарах для дома, хранения, быта, "
           f"уюта и красоты. Тема: {rubric}. Выбери ОДИН самый цепляющий товар. "
           "Текст: 2-4 тёплых предложения о пользе, без капса и навязчивости, 2-3 эмодзи. "
+          "Точки между предложениями ставь как обычно, но НЕ ставь точку в самом конце и перед финальным эмодзи. "
           'Верни ТОЛЬКО JSON: {"nmId": <число>, "caption": "<текст>"}')
     pick=ai_json(sysp, cands)
     nm=int(pick["nmId"]); cap=(pick.get("caption") or "").strip()
@@ -240,6 +250,7 @@ def do_gallery(cands, rubric, posted):
           "У каждого товара есть поле theme. Выбери 5 товаров из РАЗНЫХ theme, максимально разные по виду "
           "и назначению. Вступление НЕЙТРАЛЬНОЕ к набору, про подборку находок для дома в целом, "
           "1-2 предложения, 1-2 эмодзи. К каждому товару — короткая строка пользы (до 12 слов, с эмодзи). "
+          "Точки между предложениями ставь как обычно, но НЕ ставь точку в конце строки и перед финальным эмодзи. "
           'Верни ТОЛЬКО JSON: {"intro":"<текст>","items":[{"nmId":<число>,"line":"<строка>"}]}')
     res=ai_json(sysp, cands)
     by={x["nmId"]:x for x in cands}
