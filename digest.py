@@ -33,6 +33,9 @@ SCHEDULE_MAP = {
     "35 18 * * *": ("evening","gallery",3), "55 18 * * *": ("evening","gallery",4),
 }
 
+# Слоты, которые нужно пропустить (формат "ГГГГ-ММ-ДД:slot"). Старт автопостинга с завтрашнего утра.
+SKIP_SLOTS = {"2026-06-06:evening"}
+
 # обычные темы (быт/дом/красота/организация/дорожный органайзинг)
 THEMES = {
     "органайзеры мелочей": ["органайзер для хранения мелочей","разделители для ящиков комода"],
@@ -189,7 +192,6 @@ THEMES = {
     "короб игрушек": ["короб для игрушек с крышкой"],
 }
 
-# вау-находки: хитрые мелочи, о которых обычно не догадываются
 WOW_THEMES = {
     "wow крышка кружки": ["силиконовая крышка для кружки от проливания"],
     "wow чистка клавиатуры": ["щетка для чистки клавиатуры мелкая"],
@@ -501,7 +503,7 @@ def resolve_slot():
     m=os.environ.get("EVENT_INPUT_MODE","").strip()
     if m: return ("manual", m, LAST_ATTEMPT)
     sched=os.environ.get("EVENT_SCHEDULE","").strip()
-    return SCHEDULE_MAP.get(sched, ("manual","single",LAST_ATTEMPT))
+    return SCHEDULE_MAP.get(sched, (None, None, None))
 
 def pick_style(state):
     recent = state.get("recent_styles", [])
@@ -524,10 +526,22 @@ def main():
     state = load_json(STATE_FILE)
     recent_themes = state.get("recent_themes", [])
     slot, mode, attempt = resolve_slot()
+
+    # Если запуск по расписанию, но время не распозналось — не постим вслепую, шлём тревогу.
+    if slot is None and not os.environ.get("EVENT_INPUT_MODE","").strip():
+        alert("⚠️ Запуск по расписанию: время не распознано, пост не сделан (проверь SCHEDULE_MAP).")
+        print("unknown schedule, skip"); return
+
     is_last = attempt >= LAST_ATTEMPT
     today = time.strftime("%Y-%m-%d", time.gmtime())
     key = f"{today}:{slot}"
+
     print("slot:", slot, "mode:", mode, "attempt:", attempt)
+
+    # Пропуск заданных слотов (старт автопостинга с завтрашнего утра)
+    if slot != "manual" and key in SKIP_SLOTS:
+        print("skip slot:", key); return
+
     if slot != "manual" and done.get(key):
         print("already done:", key); return
 
@@ -552,7 +566,8 @@ def main():
 
     if used_themes:
         remember_style(state, style); remember_themes(state, used_themes)
-        done[key] = time.time(); persist(posted, done, state); print("posted:", key); return
+        if slot != "manual": done[key] = time.time()
+        persist(posted, done, state); print("posted:", key); return
 
     if not is_last:
         print("quality failed, will retry next slot"); return
@@ -560,7 +575,8 @@ def main():
     try:
         ut = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
         if ut: remember_themes(state, ut)
-        done[key] = time.time(); persist(posted, done, state)
+        if slot != "manual": done[key] = time.time()
+        persist(posted, done, state)
         alert(f"ℹ️ Слот «{slot}»: ИИ не ответил, вышел резервный пост без живого текста.")
     except Exception as e:
         alert(f"⚠️ Слот «{slot}»: не удалось выпустить пост ({e}).")
