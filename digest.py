@@ -25,12 +25,12 @@ THEME_MEMORY = 70
 WOW_IN_POOL = 4
 
 SCHEDULE_MAP = {
-    "30 5 * * *": ("morning","single",1), "50 5 * * *": ("morning","single",2),
-    "10 6 * * *": ("morning","single",3), "30 6 * * *": ("morning","single",4),
-    "0 10 * * *": ("noon","single",1), "20 10 * * *": ("noon","single",2),
-    "40 10 * * *": ("noon","single",3), "0 11 * * *": ("noon","single",4),
-    "0 18 * * *": ("evening","gallery",1), "20 18 * * *": ("evening","gallery",2),
-    "40 18 * * *": ("evening","gallery",3), "0 19 * * *": ("evening","gallery",4),
+    "25 5 * * *": ("morning","single",1), "45 5 * * *": ("morning","single",2),
+    "5 6 * * *": ("morning","single",3), "25 6 * * *": ("morning","single",4),
+    "55 9 * * *": ("noon","single",1), "15 10 * * *": ("noon","single",2),
+    "35 10 * * *": ("noon","single",3), "55 10 * * *": ("noon","single",4),
+    "55 17 * * *": ("evening","gallery",1), "15 18 * * *": ("evening","gallery",2),
+    "35 18 * * *": ("evening","gallery",3), "55 18 * * *": ("evening","gallery",4),
 }
 
 # обычные темы (быт/дом/красота/организация/дорожный органайзинг)
@@ -428,7 +428,6 @@ def post_gallery(intro, items, posted):
     return False
 
 def do_single(cands, rubric, style, posted):
-    # для одиночного поста приоритет вау-находке, если есть
     wow = [c for c in cands if c.get("wow")]
     pref = wow if wow else cands
     sysp=("Ты — редактор уютного Telegram-канала о полезных недорогих товарах для дома, хранения, быта, "
@@ -464,7 +463,6 @@ def do_gallery(cands, rubric, style, posted):
         if not c or c["theme"] in used: continue
         used.add(c["theme"]); chosen.append((nm,(it.get("line") or "").strip(),c))
         if len(chosen)>=5: break
-    # гарантия: хотя бы одна вау-находка в галерее
     if not any(c.get("wow") for _,_,c in chosen):
         wow_c = next((c for c in cands if c.get("wow") and c["theme"] not in used), None)
         if wow_c:
@@ -568,4 +566,3 @@ def main():
         alert(f"⚠️ Слот «{slot}»: не удалось выпустить пост ({e}).")
 
 main()
-
