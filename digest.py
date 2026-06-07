@@ -25,18 +25,14 @@ THEME_MEMORY = 70
 WOW_IN_POOL = 4
 
 SCHEDULE_MAP = {
-    "25 5 * * *": ("morning","single",1), "45 5 * * *": ("morning","single",2),
-    "5 6 * * *": ("morning","single",3), "25 6 * * *": ("morning","single",4),
-    "55 9 * * *": ("noon","single",1), "15 10 * * *": ("noon","single",2),
-    "35 10 * * *": ("noon","single",3), "55 10 * * *": ("noon","single",4),
-    "55 17 * * *": ("evening","gallery",1), "15 18 * * *": ("evening","gallery",2),
-    "35 18 * * *": ("evening","gallery",3), "55 18 * * *": ("evening","gallery",4),
+    "0 11 * * *": ("noon","single",1), "20 11 * * *": ("noon","single",2),
+    "40 11 * * *": ("noon","single",3), "0 12 * * *": ("noon","single",4),
+    "0 15 * * *": ("evening1","single",1), "20 15 * * *": ("evening1","single",2),
+    "40 15 * * *": ("evening1","single",3), "0 16 * * *": ("evening1","single",4),
+    "30 18 * * *": ("evening2","gallery",1), "50 18 * * *": ("evening2","gallery",2),
+    "10 19 * * *": ("evening2","gallery",3), "30 19 * * *": ("evening2","gallery",4),
 }
 
-# Слоты, которые нужно пропустить (формат "ГГГГ-ММ-ДД:slot"). Старт автопостинга с завтрашнего утра.
-SKIP_SLOTS = {"2026-06-06:evening"}
-
-# обычные темы (быт/дом/красота/организация/дорожный органайзинг)
 THEMES = {
     "органайзеры мелочей": ["органайзер для хранения мелочей","разделители для ящиков комода"],
     "коробки": ["коробки для хранения вещей складные"],
@@ -354,6 +350,13 @@ def get_image(nm):
             continue
     return None
 
+def pick_with_image(cands):
+    # вернуть (товар, буфер_фото) для первого кандидата, у кого реально есть фото
+    for c in cands:
+        buf = get_image(c["nmId"])
+        if buf: return c, buf
+    return None, None
+
 def ai_json(system, user_obj):
     last=None
     for model in MODELS:
@@ -409,25 +412,11 @@ def tg_album(photos, caption):
     requests.post(f"{API}/sendMediaGroup",
         data={"chat_id":CHAT_ID,"media":json.dumps(media, ensure_ascii=False)}, files=files, timeout=120)
 
-def post_single(nm, cap, c, posted):
+def post_single_buf(nm, cap, c, buf, posted):
     caption=f"{esc(clean(cap))}\n\n💰 {price_from(c['price'])} → {link(nm)}"
-    buf=get_image(nm)
     tg_photo(buf, caption) if buf else tg_text(caption)
     posted[str(nm)] = time.time()
     return True
-
-def post_gallery(intro, items, posted):
-    lines=[esc(clean(intro)),""]; photos=[]; n=0
-    for nm, line, c in items:
-        buf=get_image(nm)
-        if not buf: continue
-        n+=1; photos.append(buf)
-        lines.append(f"{n}. {esc(clean(line))} — {price_from(c['price'])} → {link(nm)}")
-        posted[str(nm)] = time.time()
-    caption="\n".join(lines)
-    if len(photos)>=2: tg_album(photos, caption); return True
-    if len(photos)==1: tg_photo(photos[0], caption); return True
-    return False
 
 def do_single(cands, rubric, style, posted):
     wow = [c for c in cands if c.get("wow")]
@@ -444,7 +433,13 @@ def do_single(cands, rubric, style, posted):
     nm=int(pick["nmId"]); cap=(pick.get("caption") or "").strip()
     c={x["nmId"]:x for x in cands}.get(nm)
     if not c or not cap: return None
-    post_single(nm, cap, c, posted)
+    buf=get_image(nm)
+    if not buf:
+        # у выбранного нет фото — берём ближайший товар с фото, текст оставляем
+        alt, buf = pick_with_image([x for x in cands if x["nmId"]!=nm])
+        if alt: c, nm = alt, alt["nmId"]
+        else: return None
+    post_single_buf(nm, cap, c, buf, posted)
     return [c["theme"]]
 
 def do_gallery(cands, rubric, style, posted):
@@ -475,28 +470,57 @@ def do_gallery(cands, rubric, style, posted):
             if c["theme"] in used: continue
             used.add(c["theme"]); chosen.append((c["nmId"], c["name"], c))
             if len(chosen)>=5: break
-    if len(chosen)<2: return None
     intro=(res.get("intro") or "Полезные находки для дома 🏡").strip()
-    if post_gallery(intro, chosen, posted):
-        return [c["theme"] for _,_,c in chosen]
+    # собираем галерею только из товаров, у которых реально есть фото
+    lines=[esc(clean(intro)),""]; photos=[]; n=0; used_themes=[]
+    for nm, line, c in chosen:
+        buf=get_image(nm)
+        if not buf: continue
+        n+=1; photos.append(buf)
+        lines.append(f"{n}. {esc(clean(line))} — {price_from(c['price'])} → {link(nm)}")
+        posted[str(nm)] = time.time(); used_themes.append(c["theme"])
+    # если из выбранных мало с фото — добираем другими товарами с фото из пула
+    if n < 5:
+        already = {nm for nm,_,_ in chosen}
+        for c in cands:
+            if c["nmId"] in already or c["theme"] in set(used_themes): continue
+            buf=get_image(c["nmId"])
+            if not buf: continue
+            n+=1; photos.append(buf)
+            lines.append(f"{n}. {esc(clean(c['name']))} — {price_from(c['price'])} → {link(c['nmId'])}")
+            posted[str(c["nmId"])] = time.time(); used_themes.append(c["theme"])
+            if n>=5: break
+    caption="\n".join(lines)
+    if len(photos)>=2: tg_album(photos, caption); return used_themes
+    if len(photos)==1: tg_photo(photos[0], caption); return used_themes
     return None
 
 def simple_single(cands, posted):
-    c=max(cands, key=lambda x: x["reviews"])
-    post_single(c["nmId"], c["name"], c, posted)
+    c, buf = pick_with_image(sorted(cands, key=lambda x: x["reviews"], reverse=True))
+    if not c: return None
+    cap=f"{esc(c['name'])}\n\n💰 {price_from(c['price'])} → {link(c['nmId'])}"
+    tg_photo(buf, cap)
+    posted[str(c["nmId"])] = time.time()
     return [c["theme"]]
 
 def simple_gallery(cands, posted):
-    chosen=[]; used=set()
+    intro="Полезные находки для дома 🏡"
+    lines=[intro,""]; photos=[]; n=0; used=set(); used_themes=[]
+    ordered=[]
     wow_c = next((c for c in cands if c.get("wow")), None)
-    if wow_c:
-        used.add(wow_c["theme"]); chosen.append((wow_c["nmId"], wow_c["name"], wow_c))
-    for c in cands:
+    if wow_c: ordered.append(wow_c)
+    ordered += [c for c in cands if c is not wow_c]
+    for c in ordered:
         if c["theme"] in used: continue
-        used.add(c["theme"]); chosen.append((c["nmId"], c["name"], c))
-        if len(chosen)>=5: break
-    if post_gallery("Полезные находки для дома 🏡", chosen, posted):
-        return [c["theme"] for _,_,c in chosen]
+        buf=get_image(c["nmId"])
+        if not buf: continue
+        used.add(c["theme"]); n+=1; photos.append(buf)
+        lines.append(f"{n}. {esc(c['name'])} — {price_from(c['price'])} → {link(c['nmId'])}")
+        posted[str(c["nmId"])] = time.time(); used_themes.append(c["theme"])
+        if n>=5: break
+    caption="\n".join(lines)
+    if len(photos)>=2: tg_album(photos, caption); return used_themes
+    if len(photos)==1: tg_photo(photos[0], caption); return used_themes
     return None
 
 def resolve_slot():
@@ -527,7 +551,6 @@ def main():
     recent_themes = state.get("recent_themes", [])
     slot, mode, attempt = resolve_slot()
 
-    # Если запуск по расписанию, но время не распозналось — не постим вслепую, шлём тревогу.
     if slot is None and not os.environ.get("EVENT_INPUT_MODE","").strip():
         alert("⚠️ Запуск по расписанию: время не распознано, пост не сделан (проверь SCHEDULE_MAP).")
         print("unknown schedule, skip"); return
@@ -535,12 +558,7 @@ def main():
     is_last = attempt >= LAST_ATTEMPT
     today = time.strftime("%Y-%m-%d", time.gmtime())
     key = f"{today}:{slot}"
-
     print("slot:", slot, "mode:", mode, "attempt:", attempt)
-
-    # Пропуск заданных слотов (старт автопостинга с завтрашнего утра)
-    if slot != "manual" and key in SKIP_SLOTS:
-        print("skip slot:", key); return
 
     if slot != "manual" and done.get(key):
         print("already done:", key); return
@@ -550,8 +568,9 @@ def main():
     if len(cands) < need:
         cands = collect(posted, recent_themes, relaxed=True)
     print("Candidates:", len(cands))
+
     if len(cands) < (2 if mode=="gallery" else 1):
-        if is_last: alert(f"⚠️ Слот «{slot}»: нет товаров, пост пропущен.")
+        if is_last: alert(f"⚠️ Слот «{slot}»: WB не дал товаров, пост не вышел.")
         else: print("not enough, retry later")
         return
 
@@ -574,11 +593,14 @@ def main():
 
     try:
         ut = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
-        if ut: remember_themes(state, ut)
-        if slot != "manual": done[key] = time.time()
-        persist(posted, done, state)
-        alert(f"ℹ️ Слот «{slot}»: ИИ не ответил, вышел резервный пост без живого текста.")
+        if ut:
+            remember_themes(state, ut)
+            if slot != "manual": done[key] = time.time()
+            persist(posted, done, state)
+            alert(f"ℹ️ Слот «{slot}»: вышел простой пост (ИИ не ответил).")
+        else:
+            alert(f"⚠️ Слот «{slot}»: не удалось собрать пост с фото.")
     except Exception as e:
-        alert(f"⚠️ Слот «{slot}»: не удалось выпустить пост ({e}).")
+        alert(f"⚠️ Слот «{slot}»: ошибка при простом посте ({e}).")
 
 main()
