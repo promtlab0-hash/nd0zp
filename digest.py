@@ -19,19 +19,18 @@ DONE_FILE = "done.json"
 STATE_FILE = "state.json"
 COOLDOWN_DAYS = 30
 MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini"]
-LAST_ATTEMPT = 4
 STYLE_MEMORY = 3
 THEME_MEMORY = 70
 WOW_IN_POOL = 4
+EMERGENCY_MARGIN = 20
 
-SCHEDULE_MAP = {
-    "0 11 * * *": ("noon","single",1), "20 11 * * *": ("noon","single",2),
-    "40 11 * * *": ("noon","single",3), "0 12 * * *": ("noon","single",4),
-    "0 15 * * *": ("evening1","single",1), "20 15 * * *": ("evening1","single",2),
-    "40 15 * * *": ("evening1","single",3), "0 16 * * *": ("evening1","single",4),
-    "30 18 * * *": ("evening2","gallery",1), "50 18 * * *": ("evening2","gallery",2),
-    "10 19 * * *": ("evening2","gallery",3), "30 19 * * *": ("evening2","gallery",4),
-}
+# Окна в UTC: (час_нач, мин_нач, час_кон, мин_кон, слот, режим)
+# Слот1 07:00-13:30 МСК = 04:00-10:30 UTC | Слот2 14:00-18:30 МСК = 11:00-15:30 UTC | Слот3 19:00-23:30 МСК = 16:00-20:30 UTC
+WINDOWS = [
+    (4, 0, 10, 30, "slot1", "single"),
+    (11, 0, 15, 30, "slot2", "single"),
+    (16, 0, 20, 30, "slot3", "gallery"),
+]
 
 THEMES = {
     "органайзеры мелочей": ["органайзер для хранения мелочей","разделители для ящиков комода"],
@@ -351,7 +350,6 @@ def get_image(nm):
     return None
 
 def pick_with_image(cands):
-    # вернуть (товар, буфер_фото) для первого кандидата, у кого реально есть фото
     for c in cands:
         buf = get_image(c["nmId"])
         if buf: return c, buf
@@ -435,7 +433,6 @@ def do_single(cands, rubric, style, posted):
     if not c or not cap: return None
     buf=get_image(nm)
     if not buf:
-        # у выбранного нет фото — берём ближайший товар с фото, текст оставляем
         alt, buf = pick_with_image([x for x in cands if x["nmId"]!=nm])
         if alt: c, nm = alt, alt["nmId"]
         else: return None
@@ -471,7 +468,6 @@ def do_gallery(cands, rubric, style, posted):
             used.add(c["theme"]); chosen.append((c["nmId"], c["name"], c))
             if len(chosen)>=5: break
     intro=(res.get("intro") or "Полезные находки для дома 🏡").strip()
-    # собираем галерею только из товаров, у которых реально есть фото
     lines=[esc(clean(intro)),""]; photos=[]; n=0; used_themes=[]
     for nm, line, c in chosen:
         buf=get_image(nm)
@@ -479,7 +475,6 @@ def do_gallery(cands, rubric, style, posted):
         n+=1; photos.append(buf)
         lines.append(f"{n}. {esc(clean(line))} — {price_from(c['price'])} → {link(nm)}")
         posted[str(nm)] = time.time(); used_themes.append(c["theme"])
-    # если из выбранных мало с фото — добираем другими товарами с фото из пула
     if n < 5:
         already = {nm for nm,_,_ in chosen}
         for c in cands:
@@ -523,11 +518,24 @@ def simple_gallery(cands, posted):
     if len(photos)==1: tg_photo(photos[0], caption); return used_themes
     return None
 
+def current_window():
+    now = time.gmtime()
+    cur = now.tm_hour*60 + now.tm_min
+    for sh, sm, eh, em, slot, mode in WINDOWS:
+        if sh*60+sm <= cur < eh*60+em:
+            return slot, mode, (eh*60+em)
+    return None, None, None
+
 def resolve_slot():
-    m=os.environ.get("EVENT_INPUT_MODE","").strip()
-    if m: return ("manual", m, LAST_ATTEMPT)
-    sched=os.environ.get("EVENT_SCHEDULE","").strip()
-    return SCHEDULE_MAP.get(sched, (None, None, None))
+    m = os.environ.get("EVENT_INPUT_MODE","").strip()
+    if m:
+        return ("manual", m, None)
+    return current_window()
+
+def minutes_left(end_min):
+    if end_min is None: return 999
+    now = time.gmtime(); cur = now.tm_hour*60 + now.tm_min
+    return end_min - cur
 
 def pick_style(state):
     recent = state.get("recent_styles", [])
@@ -549,18 +557,18 @@ def main():
     done = prune_done(load_json(DONE_FILE))
     state = load_json(STATE_FILE)
     recent_themes = state.get("recent_themes", [])
-    slot, mode, attempt = resolve_slot()
+    slot, mode, end_min = resolve_slot()
 
-    if slot is None and not os.environ.get("EVENT_INPUT_MODE","").strip():
-        alert("⚠️ Запуск по расписанию: время не распознано, пост не сделан (проверь SCHEDULE_MAP).")
-        print("unknown schedule, skip"); return
+    if slot is None:
+        print("not in any window, idle"); return
 
-    is_last = attempt >= LAST_ATTEMPT
     today = time.strftime("%Y-%m-%d", time.gmtime())
     key = f"{today}:{slot}"
-    print("slot:", slot, "mode:", mode, "attempt:", attempt)
+    is_manual = (slot == "manual")
+    emergency = is_manual or (minutes_left(end_min) <= EMERGENCY_MARGIN)
+    print("slot:", slot, "mode:", mode, "emergency:", emergency)
 
-    if slot != "manual" and done.get(key):
+    if not is_manual and done.get(key):
         print("already done:", key); return
 
     cands = collect(posted, recent_themes, relaxed=False)
@@ -570,37 +578,46 @@ def main():
     print("Candidates:", len(cands))
 
     if len(cands) < (2 if mode=="gallery" else 1):
-        if is_last: alert(f"⚠️ Слот «{slot}»: WB не дал товаров, пост не вышел.")
-        else: print("not enough, retry later")
+        if emergency: alert(f"⚠️ Слот «{slot}»: WB не дал товаров, пост не вышел.")
+        else: print("WB empty, retry in window")
         return
 
     rubric = random.choice(RUBRICS)
     style = pick_style(state)
-    print("rubric:", rubric, "| style:", style)
     used_themes = None
+
+    if emergency:
+        try:
+            used_themes = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
+        except Exception as e:
+            print("emergency simple failed:", e); used_themes = None
+        if used_themes:
+            remember_themes(state, used_themes)
+            if not is_manual: done[key] = time.time()
+            persist(posted, done, state)
+            alert(f"⚠️ Слот «{slot}»: сработала аварийная попытка — вышел упрощённый пост.")
+            print("emergency posted:", key)
+        else:
+            alert(f"⚠️ Слот «{slot}»: аварийная попытка не смогла собрать пост (проверь WB).")
+        return
+
     try:
         used_themes = do_gallery(cands, rubric, style, posted) if mode=="gallery" else do_single(cands, rubric, style, posted)
     except Exception as e:
         print("quality path failed:", e); used_themes = None
 
+    if not used_themes:
+        try:
+            used_themes = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
+            if used_themes: alert(f"ℹ️ Слот «{slot}»: вышел простой пост (ИИ не ответил).")
+        except Exception as e:
+            print("simple path failed:", e); used_themes = None
+
     if used_themes:
         remember_style(state, style); remember_themes(state, used_themes)
-        if slot != "manual": done[key] = time.time()
+        done[key] = time.time()
         persist(posted, done, state); print("posted:", key); return
 
-    if not is_last:
-        print("quality failed, will retry next slot"); return
-
-    try:
-        ut = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
-        if ut:
-            remember_themes(state, ut)
-            if slot != "manual": done[key] = time.time()
-            persist(posted, done, state)
-            alert(f"ℹ️ Слот «{slot}»: вышел простой пост (ИИ не ответил).")
-        else:
-            alert(f"⚠️ Слот «{slot}»: не удалось собрать пост с фото.")
-    except Exception as e:
-        alert(f"⚠️ Слот «{slot}»: ошибка при простом посте ({e}).")
+    print("post failed, will retry in window")
 
 main()
