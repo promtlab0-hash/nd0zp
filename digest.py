@@ -813,8 +813,9 @@ def main():
     today = time.strftime("%Y-%m-%d", time.gmtime())
     key = f"{today}:{slot}"
     is_manual = (slot == "manual")
-    emergency = is_manual or (minutes_left(end_min) <= EMERGENCY_MARGIN)
-    print("slot:", slot, "mode:", mode, "emergency:", emergency)
+    # финальная попытка = ручной запуск ИЛИ конец окна. Только в финале допустим простой пост.
+    final = is_manual or (minutes_left(end_min) <= EMERGENCY_MARGIN)
+    print("slot:", slot, "mode:", mode, "final:", final)
 
     if not is_manual and done.get(key):
         print("already done:", key); return
@@ -826,46 +827,48 @@ def main():
     print("Candidates:", len(cands))
 
     if len(cands) < (2 if mode=="gallery" else 1):
-        if emergency: alert(f"⚠️ Слот «{slot}»: WB не дал товаров, пост не вышел.")
-        else: print("WB empty, retry in window")
+        # товаров нет (проблема WB). Постить нечего.
+        if final:
+            alert(f"⚠️ Слот «{slot}»: WB не дал товаров, пост не вышел.")
+        else:
+            print("WB empty, retry next tick")
         return
 
     rubric = random.choice(RUBRICS)
     style = pick_style(state)
+
+    # 1) ВСЕГДА сначала пробуем ХОРОШИЙ пост (и автоматом, и вручную)
     used_themes = None
-
-    if emergency:
-        try:
-            used_themes = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
-        except Exception as e:
-            print("emergency simple failed:", e); used_themes = None
-        if used_themes:
-            remember_themes(state, used_themes)
-            if not is_manual: done[key] = time.time()
-            persist(posted, done, state)
-            alert(f"⚠️ Слот «{slot}»: сработала аварийная попытка — вышел упрощённый пост.")
-            print("emergency posted:", key)
-        else:
-            alert(f"⚠️ Слот «{slot}»: аварийная попытка не смогла собрать пост (проверь WB).")
-        return
-
     try:
         used_themes = do_gallery(cands, rubric, style, posted) if mode=="gallery" else do_single(cands, rubric, style, posted)
     except Exception as e:
         print("quality path failed:", e); used_themes = None
 
-    if not used_themes:
-        try:
-            used_themes = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
-            if used_themes: alert(f"ℹ️ Слот «{slot}»: вышел простой пост (ИИ не ответил).")
-        except Exception as e:
-            print("simple path failed:", e); used_themes = None
-
+    # 2) Хороший получился — постим, без тревог
     if used_themes:
         remember_style(state, style); remember_themes(state, used_themes)
         done[key] = time.time()
-        persist(posted, done, state); print("posted:", key); return
+        persist(posted, done, state); print("good posted:", key); return
 
-    print("post failed, will retry in window")
+    # 3) Хороший НЕ получился. Если ещё есть время в окне — ждём следующую попытку (вдруг ИИ оживёт), не спамим.
+    if not final:
+        print("quality failed mid-window, will retry next tick"); return
+
+    # 4) Финал (ручной запуск или конец окна), а хорошего нет — делаем ПРОСТОЙ пост + ⚠️ в личку
+    used_themes = None
+    try:
+        used_themes = (simple_gallery if mode=="gallery" else simple_single)(cands, posted)
+    except Exception as e:
+        print("simple path failed:", e); used_themes = None
+
+    if used_themes:
+        remember_themes(state, used_themes)
+        if not is_manual: done[key] = time.time()
+        persist(posted, done, state)
+        alert(f"⚠️ Слот «{slot}»: не удалось сделать хороший пост — вышел простой.")
+        print("simple posted:", key)
+    else:
+        alert(f"⚠️ Слот «{slot}»: не удалось сделать пост вообще (проверь WB или ИИ).")
+    return
 
 main()
